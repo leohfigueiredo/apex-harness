@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C binaries
+benchmarks/membw
+*.o
+*.a
+
+# Databases & Local state
+*.db
+*.sqlite
+*.sqlite3
+apex_rag/
+*.parquet
+
+# Personal & Application docs
+Applications/
+backups/
+ORIGINAL_SEM_CORRECOES/
+guardado_swift_metadados/
+
+# Environment & credentials
+.env
+.env.*
+*.secret
+*.key
+
+# Logs & OS artifacts
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Local benchmark runtime outputs
+benchmarks/resultados/
+apex_bench_results/

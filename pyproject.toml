@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apex-harness"
+version = "1.0.0"
+description = "Hardware-aware autonomous agentic harness, hybrid RAG engine, and benchmark suite for local LLM inference"
+readme = "README.md"
+authors = [
+    { name = "Leonardo Figueiredo", email = "leohfigueiredo@gmail.com" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = [
+    "llm",
+    "agent",
+    "llama-cpp",
+    "hardware-tuning",
+    "rag",
+    "bm25",
+    "declarative-attention",
+    "mcp",
+    "speculative-decoding",
+    "ryzen-ai"
+]
+dependencies = [
+    "httpx>=0.24.0",
+    "rich>=13.0.0",
+    "prompt_toolkit>=3.0.36",
+    "numpy>=1.24.0"
+]
+
+[project.optional-dependencies]
+all = [
+    "openai>=1.0.0",
+    "mcp>=0.1.0"
+]
+
+[project.scripts]
+apex-harness = "apex_harness.cli:main"
+apex-bench = "apex_harness.bench:main"
+
+[tool.setuptools.packages.find]
+include = ["apex_harness*"]
+exclude = ["tests*", "benchmarks*"]
