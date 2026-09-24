@@ -232,6 +232,8 @@ class ApexWebHandler(BaseHTTPRequestHandler):
             self._handle_post_session_new()
         elif url_path in ("/api/session/delete", "/api/sessions/delete"):
             self._handle_delete_session(data)
+        elif url_path in ("/api/session/rename", "/api/sessions/rename"):
+            self._handle_post_session_rename(data)
         elif url_path == "/api/mcp":
             self._handle_post_mcp(data)
         elif url_path == "/api/btw":
@@ -627,6 +629,21 @@ class ApexWebHandler(BaseHTTPRequestHandler):
             "status": "ok",
             "deleted": sess_id,
             "active_session_id": active_id
+        })
+
+    def _handle_post_session_rename(self, data: Optional[Dict[str, Any]] = None):
+        data = data or {}
+        sess_id = (data.get("id") or "").strip()
+        new_title = (data.get("title") or data.get("name") or data.get("summary") or "").strip()
+        if not sess_id or not new_title:
+            self._send_json({"error": "Campos 'id' e 'title' são obrigatórios"}, status=400)
+            return
+        mem = get_session_memory()
+        mem.update_summary(sess_id, new_title)
+        self._send_json({
+            "status": "ok",
+            "id": sess_id,
+            "title": new_title
         })
 
     def _handle_get_mcp(self):

@@ -108,6 +108,7 @@ Separates fast reactive decisions from heavy generative coding:
 - **Model Hot-Swap**: Switch between active models (e.g. Qwen 3.6-35B MoE, Swift Qwen 3.8-27B) mid-session without restarting the harness or losing context.
 - **MCP Server Management Modal**: Visual checklist allowing one-click **Turbo Mode** (disables MCP schemas to maximize token speed) or granular per-server enabling (`memory`, `notebooks`, `sequential-thinking`, `hyperresearch`, etc.).
 - **Bilingual Interface**: Seamlessly switch between **Português (BR)** 🇧🇷 and **English** 🇺🇸 with instant UI re-rendering and persistent preferences.
+- **Conversation Renaming & Management**: Rename any session on-the-fly via the sidebar ✏️ button, inline double-click editing, or the `/rename <title>` command.
 
 ### 3. Hardware-Topology Aware Auto-Tuning (`hwtune.py`)
 - **Zero-Dependency GGUF Parser**: Extracts context length, tensor types, and layer counts in pure Python standard library (`struct` + `mmap`).
@@ -177,6 +178,7 @@ Inside the interactive chat interface, use slash commands to inspect and manage 
 | `/cost` | Display cumulative session token statistics (prompt, completion, speed) |
 | `/init` | Generate an `APEX.md` guideline file in the active workspace |
 | `/status` | View model parameters, active context size, and session turns |
+| `/rename <name>` | Rename the active conversation / session |
 | `/clear` | Clear conversation memory and reset working context |
 
 ---
