@@ -183,6 +183,10 @@ class Result:
     # resource
     rss_peak_mib: float = 0.0
     model_size_gib: float = 0.0
+    #: GiB realmente lidos do disco/RAM por token. Para um modelo DENSO e igual a
+    #: model_size_gib; para um MoE e o tamanho dos pesos ATIVOS (ex.: 3B de 30B),
+    #: que e o que determina o teto de decode. Calculado por hwtune.profile_model().
+    effective_weight_gib: float = 0.0
     effective_bw_gbs: float = 0.0
     # meta
     server_info: Dict[str, Any] = field(default_factory=dict)
@@ -306,8 +310,12 @@ def measure_once(
         res.client_prefill_tps = res.srv_prompt_n / ttft
 
     # ---- effective bandwidth ---------------------------------------------- #
-    if res.srv_predicted_tps and res.model_size_gib:
-        res.effective_bw_gbs = res.srv_predicted_tps * res.model_size_gib
+    # Para MoE isto TEM de usar os pesos ATIVOS, nao o tamanho do ficheiro: um
+    # Qwen3-Coder-30B-A3B ocupa 16,3 GB no disco mas so le ~1,6 GB por token
+    # (3B de 30B parametros ativos). Multiplicar pelo tamanho do ficheiro dava
+    # 602 GB/s -- impossivel, com um pico medido de 118 GB/s.
+    if res.srv_predicted_tps and res.effective_weight_gib:
+        res.effective_bw_gbs = res.srv_predicted_tps * res.effective_weight_gib
 
     return res
 
@@ -345,7 +353,8 @@ def fmt_table(results: List[Result], apu: Dict[str, Any], topo: Dict[str, Any]) 
         )
     lines.append("-" * w)
     lines.append(" prefill t/s = server prompt_eval  |  decode t/s = server eval (ground truth)")
-    lines.append(" cli dec t/s = wall-clock incl. Python/HTTP overhead  |  BW GB/s = model_GiB x decode t/s")
+    lines.append(" cli dec t/s = wall-clock incl. Python/HTTP overhead")
+    lines.append(" BW GB/s = GiB LIDOS POR TOKEN x decode t/s  (pesos ativos, nao o tamanho do ficheiro)")
     lines.append("=" * w)
     return "\n".join(lines)
 
@@ -394,12 +403,31 @@ def main() -> int:
     model_size_gib = args.model_size_gib
     if not model_size_gib and model_path and os.path.exists(model_path):
         model_size_gib = round(os.path.getsize(model_path) / 1024**3, 3)
+
+    # MoE-aware: um modelo com 3B ativos so le ~10% dos pesos por token. Isto
+    # muda completamente a leitura do numero de banda.
+    eff_weight_gib = model_size_gib
+    arch_hint = ""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from apex_harness.hwtune import profile_model as _prof
+        _p = _prof(model_path)
+        if _p.size_gib:
+            eff_weight_gib = round(_p.active_weight_gib, 3)
+            if _p.is_moe:
+                arch_hint = (f"MoE {_p.n_expert} experts, {_p.n_expert_used} ativos/token "
+                             f"-> {_p.active_fraction*100:.1f}% dos pesos por token")
+    except Exception:
+        pass
     n_ctx = props.get("default_generation_settings", {}).get("n_ctx")
     n_threads = (props.get("default_generation_settings", {}) or {}).get("n_threads")
 
     print(f"server   : {args.url}  pid={pid}")
     print(f"model    : {os.path.basename(model_path) if model_path else '(unknown)'}  "
-          f"({model_size_gib:.2f} GiB)")
+          f"({model_size_gib:.2f} GiB em disco, {eff_weight_gib:.2f} GiB lidos por token)")
+    if arch_hint:
+        print(f"           {arch_hint}")
     print(f"n_ctx    : {n_ctx}   n_threads: {n_threads}")
     print(f"cpu      : fast={topo.get('fast_cpus')} slow={topo.get('slow_cpus')}")
     print()
@@ -411,9 +439,9 @@ def main() -> int:
                 lbl = args.label if args.repeats == 1 else f"{args.label}.{rep}"
                 r = measure_once(args.url, args.model, pt, gt, lbl, pid)
                 r.model_size_gib = model_size_gib
-                # recompute BW now that we know the model size
-                if r.srv_predicted_tps and model_size_gib:
-                    r.effective_bw_gbs = r.srv_predicted_tps * model_size_gib
+                r.effective_weight_gib = eff_weight_gib
+                if r.srv_predicted_tps and eff_weight_gib:
+                    r.effective_bw_gbs = r.srv_predicted_tps * eff_weight_gib
                 r.server_info = {"n_ctx": n_ctx, "n_threads": n_threads, "model": model_path}
                 results.append(r)
                 status = f"ERROR {r.error}" if r.error else \

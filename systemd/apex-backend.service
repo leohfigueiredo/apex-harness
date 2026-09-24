@@ -1,0 +1,57 @@
+[Unit]
+Description=Apex Harness - backend llama-server (porta 8080)
+Documentation=file:///home/leonardo/apex_harness/POR_QUE_REINICIA.md
+
+# O harness web NAO carrega modelo. Ele procura http://127.0.0.1:8080/v1
+# (apex_harness/core.py:detect_active_api_base, que testa 8080 e depois 1234) e,
+# sem nada la, responde "status": "offline" -- o turno nunca fecha e o botao de
+# enviar fica desabilitado para sempre. Foi o que aconteceu depois dos reboots
+# de 18/09: o LM Studio foi morto pelo OOM as 14:44 e nunca voltou.
+After=default.target
+
+# Uma recusa do memguard e um resultado definitivo, nao uma falha transitoria.
+# Sem isto o servico entrava em ciclo a tentar carregar um modelo que nunca vai
+# caber, queimando CPU a cada 15s.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=exec
+WorkingDirectory=/home/leonardo/apex_harness
+
+# --foreground faz exec no llama-server em vez de destacar com setsid: o systemd
+# passa a ser dono do PID e consegue supervisionar/parar/reiniciar. Com
+# `setsid ... &` seguido de saida, o systemd acharia que o servico terminou e
+# mataria o cgroup inteiro.
+ExecStart=/home/leonardo/apex_harness/arrancar_backend.sh --foreground
+
+# `systemctl start` so retorna quando o modelo esta mesmo a servir.
+ExecStartPost=/home/leonardo/apex_harness/systemd/esperar_pronto.sh
+
+# 3 = modelo recusado pelo memguard (nao cabe nesta UMA)
+# 4 = ficheiro do modelo nao apareceu (NTFS sujo montado so-leitura, etc.)
+# Sao resultados finais, nao falhas: nao reiniciar.
+SuccessExitStatus=3 4
+
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=900
+TimeoutStopSec=60
+KillMode=mixed
+
+# NOTA: NAO usar SupplementaryGroups=render video aqui.
+#
+# Num serviço de UTILIZADOR o systemd nao consegue aplicar grupos suplementares
+# e a unidade morre no arranque com `status=216/GROUP` ("Failed to determine
+# supplementary groups") -- foi o que aconteceu na primeira instalacao. Nao e
+# preciso: um processo de utilizador herda os grupos do proprio utilizador, e o
+# leonardo ja esta em render e video. O que interessa e mesmo ter acesso a
+# /dev/dri, e isso vem dessa pertença, nao de uma diretiva da unidade.
+# Verifique com:  id -nG | tr ' ' '\n' | grep -E '^(render|video)$'
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apex-backend
+
+[Install]
+WantedBy=default.target

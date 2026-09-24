@@ -37,3 +37,10 @@ guardado_swift_metadados/
 # Local benchmark runtime outputs
 benchmarks/resultados/
 apex_bench_results/
+
+# Build & packaging
+*.egg-info/
+.kilo/
+curriculos/
+run/
+.venv/

@@ -13,15 +13,17 @@
 
 ## 🎯 Overview
 
-Running 27B–70B models locally isn't just about loading weights into RAM. It requires precise cache locality, thread affinity across heterogeneous cores (Zen 5 vs. Zen 5c), speculative decoding, low prompt prefill latency, and active context compression.
+Running 27B–70B models locally isn\x27t just about loading weights into RAM. It requires precise cache locality, thread affinity across heterogeneous cores (Zen 5 vs. Zen 5c), speculative decoding, low prompt prefill latency, and active context compression.
 
 **Apex Harness** is a production-grade autonomous agent and benchmarking environment designed to unlock maximum token throughput and zero-waste context utilization on local hardware:
 
 - **🚀 Throughput Boosted from 13 t/s to ~25 t/s** on 27B-class models (e.g. Qwen3.8-27B) via automated speculative decoding tuning and CPU thread topology pinning.
-- **🧠 First Harness to Integrate Declarative Attention Protocol ([arXiv:2609.02737](https://arxiv.org/abs/2609.02737))**: Enforces `<local>`, `<focus:N>`, and `<global>` scope boundaries, slashing repetitive multi-turn prompt tokens by **up to 31.1%**.
+- **⚡ Jev Decider Layer (System 1 / System 2 Architecture)**: Fast, non-blocking sidecar decision layer (`CHOICE`, `SCORE`, `NOUL`) that handles tool schema pruning, execution permits, and guardrails concurrently with the primary coding model.
+- **🧠 Declarative Attention Protocol ([arXiv:2609.02737](https://arxiv.org/abs/2609.02737))**: Enforces `<local>`, `<focus:N>`, and `<global>` scope boundaries, slashing repetitive multi-turn prompt tokens by **up to 31.1%**.
+- **🌐 Full Web UI with Hot-Swap & Bilingual Support**: Modern web dashboard with live token/RAM/context telemetry, mid-task model switching, dedicated **MCP Server Management Modal**, and instant **EN 🇺🇸 / PT 🇧🇷** language toggle.
 - **⚡ Sub-Millisecond Hybrid RAG**: Custom vectorized SQLite WAL + NumPy matrix store achieving **0.19 ms dense vector search** and **1.89 ms batched BM25 lexical search**, combined with Reciprocal Rank Fusion (RRF).
 - **🛠️ Resilient Tool Calling**: Supports standard OpenAI function calling alongside regex-based fallbacks for models that output tool calls in plain markdown or `<tool_call>` tags.
-- **🔌 Model Context Protocol (MCP)**: Native stdio client connecting instantly to MCP servers (`memory`, `sequential-thinking`, `filesystem`, etc.).
+- **🔌 Model Context Protocol (MCP)**: Native stdio client connecting instantly to MCP servers (`memory`, `sequential-thinking`, `hyperresearch`, `notebooks`, `visualization`, etc.).
 - **📊 Real-Time Benchmark Suite (`apex-bench`)**: Automated measurement of Time-to-First-Token (TTFT), generation t/s, and draft speculation efficiency.
 
 ---
@@ -31,18 +33,21 @@ Running 27B–70B models locally isn't just about loading weights into RAM. It r
 ```mermaid
 flowchart TD
     subgraph Host["Hardware & Execution Layer"]
-        HW[AMD Ryzen AI 9 HX 370 / 96GB Unified RAM]
-        HWTune["hwtune.py<br/>• Zen5 vs Zen5c Core Pinning<br/>• GGUF Header Parser (Pure Stdlib)<br/>• GTT vs VRAM Threshold Detection"]
+        HW["AMD Ryzen AI 9 HX 370 / 96GB Unified RAM"]
+        HWTune["hwtune.py<br/>• Zen5 vs Zen5c Core Pinning<br/>• GGUF Header Parser<br/>• GTT vs VRAM Threshold Detection"]
         HW --> HWTune
-        HWTune --> LServer["llama-server (ROCm / Vulkan / AVX-512)"]
+        HWTune --> LServer["Coding Model (llama-server :8080)"]
+        HWTune --> JevServer["Jev Decider Sidecar (:8091)"]
     end
 
     subgraph Core["Apex Harness Core"]
         Agent["ApexAgent (core.py)"]
+        Jev["JevDecider (jev_decider.py)<br/>• ask_choice / ask_score / ask_noul<br/>• Concurrency Pool"]
         DA["Declarative Attention Protocol<br/>(arXiv:2609.02737)"]
-        Prune["Dynamic Tool Schema Pruning<br/>(Saves 2k-4k tokens/turn)"]
+        Prune["Dynamic Tool Schema Pruning"]
         Compact["Sliding-Window Compaction"]
         
+        Agent --- Jev
         Agent --- DA
         Agent --- Prune
         Agent --- Compact
@@ -50,13 +55,15 @@ flowchart TD
 
     subgraph Extensions["Tooling & Memory"]
         RAG["ApexRAG (Hybrid Store)<br/>• 0.19ms Dense Search (NumPy)<br/>• 1.89ms Batched BM25<br/>• Reciprocal Rank Fusion"]
-        MCP["MCP Manager (mcp_client.py)"]
+        MCP["MCP Manager (mcp_client.py)<br/>• Turbo Mode vs Full MCP Modal"]
         Builtin["Built-in Tools (tools.py)<br/>• Web Search & Clean Fetch<br/>• Resilient File Editor<br/>• Paginated FS & Shell"]
     end
 
     LServer <-->|SSE Streaming| Agent
+    JevServer <-->|Typed JSON Reflex| Jev
     Agent <--> Extensions
-    Agent <--> CLI["Interactive Terminal / GUI (cli.py / launcher.py)"]
+    Agent <--> WebUI["Web UI (:7860)<br/>• EN/PT Toggle<br/>• Model Hot-Swap<br/>• MCP Modal"]
+    Agent <--> CLI["Zenity Launcher / Terminal CLI"]
 ```
 
 ---
@@ -90,15 +97,24 @@ Measured on **AMD Ryzen AI 9 HX 370 (12 Cores / 24 Threads), Radeon 890M, 96GB L
 
 ## 🛠️ Key Capabilities
 
-### 1. Hardware-Topology Aware Auto-Tuning (`hwtune.py`)
+### 1. Jev System 1 Decider Layer (`jev_decider.py`)
+Separates fast reactive decisions from heavy generative coding:
+- **`ask_choice(state, question, options)`**: Resolves tool routing and branch decisions with calibrated confidence.
+- **`ask_noul(state, question)`**: Evaluates boolean safety guardrails and bash command execution permissions without stall.
+- **`ask_score(state, question, scale)`**: Provides rapid rubric evaluation for output quality and relevance.
+- **Zero-Think Enforcement**: Bypasses extended reasoning loops (`<think>`) for instant JSON-typed responses with prompt cache reuse (~120ms).
+
+### 2. Modern Web UI & Model Switcher (`apex_harness.server`)
+- **Model Hot-Swap**: Switch between active models (e.g. Qwen 3.6-35B MoE, Swift Qwen 3.8-27B) mid-session without restarting the harness or losing context.
+- **MCP Server Management Modal**: Visual checklist allowing one-click **Turbo Mode** (disables MCP schemas to maximize token speed) or granular per-server enabling (`memory`, `notebooks`, `sequential-thinking`, `hyperresearch`, etc.).
+- **Bilingual Interface**: Seamlessly switch between **Português (BR)** 🇧🇷 and **English** 🇺🇸 with instant UI re-rendering and persistent preferences.
+
+### 3. Hardware-Topology Aware Auto-Tuning (`hwtune.py`)
 - **Zero-Dependency GGUF Parser**: Extracts context length, tensor types, and layer counts in pure Python standard library (`struct` + `mmap`).
-- **GTT Memory Bottleneck Prevention**: Detects whether Vulkan/ROCm has sufficient dedicated VRAM allocation (`DEVICE_LOCAL`). Prevents severe PCIe/GTT memory thrashing (which makes Vulkan 2.5x slower than CPU when carve-out is below 4GB).
+- **GTT Memory Bottleneck Prevention**: Detects whether Vulkan/ROCm has sufficient dedicated VRAM allocation (`DEVICE_LOCAL`). Prevents severe PCIe/GTT memory thrashing.
 - **Heterogeneous CPU Pinning**: Maps compute threads specifically to Zen 5 performance cores while assigning I/O and server overhead to Zen 5c high-efficiency cores.
 
-### 2. Declarative Attention Protocol
-Implements the paper *“Declarative Attention: Efficient Local Context Management for Reasoning LLMs”* ([arXiv:2609.02737](https://arxiv.org/abs/2609.02737)). Apex Harness inserts attention focus scopes (`<local>`, `<focus:N>`, `<global>`) directly into the agentic reasoning cycle, directing attention heads to active working memory without blowing past context budgets.
-
-### 3. Sub-Millisecond Hybrid RAG (`apex_harness.rag`)
+### 4. Sub-Millisecond Hybrid RAG (`apex_harness.rag`)
 A zero-bloat RAG engine without heavy vector DB dependencies:
 - SQLite WAL mode with 256MB memory-mapped I/O (`mmap_size`) and 64MB memory page cache.
 - Dense similarity executed through vectorized matrix multiplication using NumPy BLAS.
@@ -119,18 +135,22 @@ cd apex-harness
 pip install -e .
 ```
 
-### Running the Agent
+### Running the Web UI
 
-Start the interactive terminal interface:
+Launch the web interface directly in your browser:
 ```bash
-# Standard run (connects to local llama-server on port 8080)
-apex-harness
+python -m apex_harness.server --port 7860
+```
+Open `http://localhost:7860` to access the chat stream, model switcher, and MCP management modal.
 
-# Or specify custom endpoint and model
-apex-harness --url http://127.0.0.1:8080/v1 --model "qwen3.8-27b"
+### Running the Terminal Agent / Desktop Launcher
 
-# Run without loading MCP servers
-apex-harness --no-mcp
+```bash
+# Graphical Zenity model and project selector:
+apex-harness-launcher
+
+# Or direct CLI:
+apex-harness --url http://127.0.0.1:8080/v1 --model "llama-local-model"
 ```
 
 ### Running Benchmarks
@@ -161,13 +181,6 @@ Inside the interactive chat interface, use slash commands to inspect and manage 
 
 ---
 
-## 📖 Documentation
-
-- [Portuguese Documentation & Notes (README em Português)](docs/README_PT.md)
-- [Empirical Hardware Optimization Report](docs/HARDWARE_BENCHMARK_REPORT_PT.md)
-
----
-
 ## 📄 License
 
 Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
@@ -177,5 +190,4 @@ Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more informa
 ## 👤 Author
 
 **Leonardo Figueiredo**  
-- GitHub: [@leohfigueiredo](https://github.com/leohfigueiredo)  
-- Email: leohfigueiredo@gmail.com
+- GitHub: [@leohfigueiredo](https://github.com/leohfigueiredo)

@@ -31,32 +31,48 @@ atexit.register(cleanup)
 signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
 signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
 
+# ORDEM IMPORTA, e era aqui que estava o bug.
+#
+# Antes isto fazia:
+#     from launcher_common import (..., launch_llama_server, ...)   # liga a ANTIGA
+#     ...
+#     _apex_install(_lc)                                            # substitui SO no modulo
+#
+# `from X import nome` copia a REFERENCIA para o namespace local. Substituir
+# `launcher_common.launch_llama_server` depois disso nao muda o nome que este
+# ficheiro ja tem ligado. A linha 172 chama o nome local, portanto continuava a
+# usar a funcao antiga -- com o LD_PRELOAD e o bloco ROCm inerte -- enquanto
+# imprimia "Servidor optimizado activo". O monkeypatch nunca chegava ao call
+# site. Provado com:
+#     launch_llama_server is _lc.launch_llama_server  ->  False
+#
+# A correcao e importar o MODULO, aplicar o patch, e so entao ligar os nomes.
 try:
-    from launcher_common import (
-        ensure_drive_mounted,
-        get_gguf_files,
-        show_zenity_model_picker,
-        show_zenity_backend_picker,
-        launch_llama_server,
-        stream_server_output,
-        wait_for_server_ready,
-        notify
-    )
+    import launcher_common as _lc
 except ImportError as e:
     print(f"\033[1;31mErro ao importar launcher_common: {e}\033[0m")
     input("\nPressione Enter para fechar...")
     sys.exit(1)
 
 # Monkeypatch: substitui launch_llama_server do launcher_common pelo
-# optimized_launcher do apex_harness (mmap+mlock, --prio 2, ngram-simple, etc).
+# optimized_launcher do apex_harness (hwtune: flags medidas, env limpo).
 # Mantém todas as outras funções do launcher_common intactas.
 try:
-    import launcher_common as _lc
     from apex_harness.optimized_launcher import install as _apex_install
     _apex_install(_lc)
-    print("\033[1;32m[Apex] Servidor optimizado activo (hwtune + ngram-simple + mmap+mlock).\033[0m")
+    print("\033[1;32m[Apex] Servidor optimizado activo (hwtune).\033[0m")
 except Exception as _patch_err:
     print(f"\033[1;33m[Apex] Aviso: optimized_launcher não aplicado ({_patch_err}). A usar launcher_common padrão.\033[0m")
+
+# Agora sim: como o modulo ja foi patchado, estes nomes sao os optimizados.
+ensure_drive_mounted = _lc.ensure_drive_mounted
+get_gguf_files = _lc.get_gguf_files
+show_zenity_model_picker = _lc.show_zenity_model_picker
+show_zenity_backend_picker = _lc.show_zenity_backend_picker
+launch_llama_server = _lc.launch_llama_server
+stream_server_output = _lc.stream_server_output
+wait_for_server_ready = _lc.wait_for_server_ready
+notify = _lc.notify
 
 def pick_folder():
     default_dir = os.path.expanduser("~/Project_1")
@@ -81,10 +97,11 @@ def ask_mcp_mode() -> bool:
     cmd = [
         "zenity", "--question",
         "--title=Apex Harness - Ferramentas MCP",
-        "--text=Como deseja inicializar as ferramentas do Apex Harness?\n\n"
+        "--text=Seleção do modo MCP (esta etapa acontece antes da Janela 2 do chat):\n\n"
                "• 🚀 Modo Turbo (Recomendado): Ferramentas nativas de código, prompt leve (~800 tok), velocidade máxima (~4.2 t/s)\n"
                "• 🔌 Modo Completo (+MCP): Carrega 59 ferramentas de pesquisa/análise (Hyperresearch, Memory, Notebooks, etc.)\n\n"
-               "(Você também pode alternar a qualquer momento no chat digitando /mcp load ou /mcp unload)",
+               "A Janela 1 é o monitor do servidor/modelo; a Janela 2 é o chat do Apex Harness.\n"
+               "Você também pode alternar a qualquer momento no chat digitando /mcp load ou /mcp unload.",
         "--ok-label=🚀 Modo Turbo (Sem MCP)",
         "--cancel-label=🔌 Modo Completo (+MCP)"
     ]
@@ -120,7 +137,14 @@ def main():
     global server_process
     try:
         ensure_drive_mounted()
-        
+
+        print("\n\033[1;36m========================================================\033[0m")
+        print("\033[1;32m  APEX HARNESS - ARRANQUE EM DUAS JANELAS\033[0m")
+        print("\033[1;36m========================================================\033[0m")
+        print("\033[1;33mJanela 1:\033[0m MONITOR DO SERVIDOR/MODELO (tokens/s, prompt eval, latência)")
+        print("\033[1;35mJanela 2:\033[0m CHAT DO APEX HARNESS no projeto selecionado")
+        print("\033[1;34mIMPORTANTE:\033[0m MCP e servidor são escolhidos antes da Janela 2; o monitor e o chat ficam separados\n")
+
         backend_mode = show_zenity_backend_picker("Apex Harness")
         if not backend_mode:
             print("Inicialização cancelada.")
@@ -149,6 +173,8 @@ def main():
             mcp_flag = "" if load_mcp else " --no-mcp"
             effort_val = pick_reasoning_effort()
             effort_flag = f" --effort {effort_val}"
+
+            print(f"\n\033[1;34mResumo da sessão:\033[0m MCP={'ON' if load_mcp else 'OFF'} | Effort={effort_val} | Projeto={working_dir}")
 
             folder_name = os.path.basename(working_dir)
             model_name = os.path.basename(selected_model_path)
@@ -189,6 +215,9 @@ def main():
 
             notify("Apex Harness Ready", f"✅ {model_name} pronto!\nAbrindo janela do agente...", icon="emblem-default")
             print(f"\n\033[1;32m✅ Servidor online e acelerado na GPU! Abrindo Apex Harness...\033[0m")
+            print(f"\033[1;35m-> Janela 1 = monitor do servidor/modelo\033[0m")
+            print(f"\033[1;35m-> Janela 2 = chat do Apex Harness\033[0m")
+            print(f"\033[1;35m-> MCP foi escolhido antes da Janela 2; monitor e chat funcionam em janelas separadas.\033[0m")
             print(f"\033[1;35m-> Acompanhe neste terminal os tokens/s e o prompt eval em tempo real.\033[0m\n")
 
             # Abrir o Apex Harness na segunda janela do terminal dedicada ao chat/projeto
